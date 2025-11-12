@@ -27,6 +27,115 @@ BENEFITS over simple RAG:
 - Finds relevant query patterns automatically
 - Applies business rules contextually
 - Better at complex questions
+
+🎯 HOW TO IMPROVE YOUR RAG:
+=====================================================================
+To make your RAG smarter and more effective, add content to knowledge_base.py:
+
+1. ADD BUSINESS RULES:
+   - Define calculation rules (e.g., "revenue only includes completed orders")
+   - Specify data quality rules (e.g., "ignore orders with null customer_id")
+   - Add validation constraints (e.g., "valid status values are: completed, shipped, processing")
+   
+   Example:
+   {
+       "id": "revenue_calculation_rule",
+       "content": "When calculating revenue, ONLY count orders where status='completed'. 
+                   Exclude 'shipped' and 'processing' orders as they haven't been delivered yet.",
+       "metadata": {
+           "type": "business_rule",
+           "category": "finance",
+           "keywords": "revenue, sales, income, money, earnings"
+       }
+   }
+
+2. ADD QUERY PATTERNS:
+   - Provide example SQL queries for common questions
+   - Show how to handle complex JOINs
+   - Demonstrate aggregations and GROUP BY patterns
+   
+   Example:
+   {
+       "id": "customer_lifetime_value_pattern",
+       "content": "To calculate customer lifetime value: 
+                   SELECT c.customer_id, c.first_name, c.last_name, 
+                   SUM(o.total_amount) as lifetime_value 
+                   FROM customers c 
+                   JOIN orders o ON c.customer_id = o.customer_id 
+                   WHERE o.status = 'completed' 
+                   GROUP BY c.customer_id, c.first_name, c.last_name 
+                   ORDER BY lifetime_value DESC",
+       "metadata": {
+           "type": "query_pattern",
+           "complexity": "medium",
+           "keywords": "customer value, lifetime, spending, total purchases"
+       }
+   }
+
+3. ADD TABLE/COLUMN CONTEXT:
+   - Explain what columns mean in business terms
+   - Document relationships between tables
+   - Note any special handling needed
+   
+   Example:
+   {
+       "id": "order_status_explanation",
+       "content": "The orders.status field has 3 values: 'completed' (delivered and paid), 
+                   'shipped' (in transit), 'processing' (being prepared). For analytics, 
+                   typically only use 'completed' orders.",
+       "metadata": {
+           "type": "column_description",
+           "table": "orders",
+           "column": "status"
+       }
+   }
+
+4. ADD DOMAIN KNOWLEDGE:
+   - Industry-specific terminology
+   - Common metrics and KPIs
+   - Calculation formulas
+   
+   Example:
+   {
+       "id": "average_order_value_definition",
+       "content": "Average Order Value (AOV) = Total Revenue / Number of Orders. 
+                   Only count completed orders. Formula: 
+                   SELECT AVG(total_amount) FROM orders WHERE status = 'completed'",
+       "metadata": {
+           "type": "domain_knowledge",
+           "category": "metrics",
+           "keywords": "aov, average order value, basket size"
+       }
+   }
+
+5. ADD SYNONYMS & VARIATIONS:
+   - List alternative ways users might ask questions
+   - Map business terms to database fields
+   
+   Example:
+   {
+       "id": "revenue_synonyms",
+       "content": "Revenue, sales, income, earnings, and turnover all refer to total_amount 
+                   in the orders table (where status='completed'). Users might ask about 
+                   any of these terms.",
+       "metadata": {
+           "type": "synonym_mapping",
+           "keywords": "revenue, sales, income, earnings, turnover, money"
+       }
+   }
+
+💡 TIPS FOR EFFECTIVE KNOWLEDGE:
+- Use descriptive IDs (e.g., "customer_retention_rule" not "rule_001")
+- Add lots of keywords to metadata (helps semantic search)
+- Write in natural language (like you're explaining to a person)
+- Include SQL examples when possible
+- Be specific about edge cases and exceptions
+
+After adding to knowledge_base.py:
+1. If ChromaDB is persistent (is_persistent=True), delete ./chroma_db folder to rebuild
+2. Restart the app to load new knowledge
+3. Test with questions that should trigger the new knowledge
+=====================================================================
 """
 import os
 import psycopg2
@@ -36,6 +145,13 @@ import chromadb
 from chromadb.config import Settings
 from sentence_transformers import SentenceTransformer
 from knowledge_base import DATABASE_KNOWLEDGE
+
+# Try to import streamlit for secrets support
+try:
+    import streamlit as st
+    HAS_STREAMLIT = True
+except ImportError:
+    HAS_STREAMLIT = False
 
 load_dotenv()
 
@@ -55,17 +171,37 @@ class SQLRAGHybridEngine:
         print("🚀 Initializing Hybrid SQL RAG Engine...")
         
         # Initialize Claude client
-        self.client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+        # Try Streamlit secrets first, then environment variables
+        if HAS_STREAMLIT and hasattr(st, 'secrets'):
+            api_key = st.secrets.get("ANTHROPIC_API_KEY", os.getenv("ANTHROPIC_API_KEY"))
+        else:
+            api_key = os.getenv("ANTHROPIC_API_KEY")
         
-        # Database configuration
-        db_host = os.getenv("DB_HOST", "localhost")
-        self.db_config = {
-            "host": db_host,
-            "database": "sql_rag_poc",
-            "user": "postgres",
-            "password": "postgres",
-            "port": 5432
-        }
+        if not api_key:
+            raise ValueError("ANTHROPIC_API_KEY not found in environment or Streamlit secrets")
+        
+        self.client = Anthropic(api_key=api_key)
+        
+        # Database configuration - prefer a Neon/DATABASE URL if provided
+        # Try Streamlit secrets first, then environment variables
+        if HAS_STREAMLIT and hasattr(st, 'secrets'):
+            self.neon_dsn = st.secrets.get("NEON_DATABASE_URL") or st.secrets.get("DATABASE_URL") or os.getenv("NEON_DATABASE_URL") or os.getenv("DATABASE_URL")
+        else:
+            self.neon_dsn = os.getenv("NEON_DATABASE_URL") or os.getenv("DATABASE_URL")
+        
+        if self.neon_dsn:
+            print("🔌 Using Neon/DATABASE URL from environment")
+            # We'll store a simple dict and pass either dsn or kwargs to psycopg2.connect
+            self.db_config = {"dsn": self.neon_dsn}
+        else:
+            db_host = os.getenv("DB_HOST", "localhost")
+            self.db_config = {
+                "host": db_host,
+                "database": os.getenv("DB_NAME", "sql_rag_poc"),
+                "user": os.getenv("DB_USER", "postgres"),
+                "password": os.getenv("DB_PASSWORD", "postgres"),
+                "port": int(os.getenv("DB_PORT", 5432))
+            }
         
         # Load traditional schema context (still useful!)
         print("📊 Loading database schema...")
@@ -77,11 +213,38 @@ class SQLRAGHybridEngine:
         self.embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
         
         # Initialize ChromaDB (vector database)
-        # This stores embeddings in memory (can be persisted to disk if needed)
+        # 
+        # 💾 PERSISTENCE OPTIONS:
+        # =======================
+        # Option 1: In-Memory (Current Setting - is_persistent=False)
+        #   ✅ Good for: Development, testing, frequently changing knowledge
+        #   ✅ Pro: Always fresh, no stale data
+        #   ❌ Con: Slower startup (re-embeds on every restart)
+        #   ❌ Con: Lost on restart
+        #
+        # Option 2: Persistent (is_persistent=True)
+        #   ✅ Good for: Production, stable knowledge base
+        #   ✅ Pro: Fast startup (embeddings cached on disk)
+        #   ✅ Pro: Survives restarts
+        #   ⚠️  Con: Must manually delete ./chroma_db to update knowledge
+        #   ⚠️  Con: Creates a folder in your project directory
+        #
+        # 🔧 TO ENABLE PERSISTENCE:
+        # 1. Change is_persistent=False to is_persistent=True below
+        # 2. Add persist_directory="./chroma_db" to Settings()
+        # 3. Add ./chroma_db to .gitignore (don't commit embeddings)
+        # 4. To update knowledge: delete ./chroma_db folder and restart
+        #
+        # Example for persistent storage:
+        # self.chroma_client = chromadb.Client(Settings(
+        #     anonymized_telemetry=False,
+        #     is_persistent=True,
+        #     persist_directory="./chroma_db"  # Where to save embeddings
+        # ))
         print("💾 Initializing vector database...")
         self.chroma_client = chromadb.Client(Settings(
             anonymized_telemetry=False,
-            is_persistent=False  # In-memory for POC, set to True for persistence
+            is_persistent=False  # ⚠️ CHANGE TO True FOR PERSISTENCE (see notes above)
         ))
         
         # Create or get collection for our knowledge
@@ -102,7 +265,11 @@ class SQLRAGHybridEngine:
         This provides the structural context about tables/columns
         """
         try:
-            conn = psycopg2.connect(**self.db_config)
+            # Support either DSN (Neon/DATABASE_URL) or kwargs
+            if 'dsn' in self.db_config:
+                conn = psycopg2.connect(self.db_config['dsn'])
+            else:
+                conn = psycopg2.connect(**self.db_config)
             cursor = conn.cursor()
             
             cursor.execute("""
@@ -157,24 +324,46 @@ class SQLRAGHybridEngine:
         3. Store in ChromaDB with metadata
         
         ChromaDB will use these embeddings to find similar content later
+        
+        🔄 HOW TO UPDATE YOUR KNOWLEDGE BASE:
+        =====================================
+        1. Edit knowledge_base.py and add new items to DATABASE_KNOWLEDGE list
+        2. If ChromaDB is persistent (is_persistent=True):
+           - Delete the ./chroma_db folder to force rebuild
+           - Or change collection name in __init__ method
+        3. If in-memory (is_persistent=False):
+           - Just restart the app, it will auto-reload
+        
+        💡 WHAT GETS EMBEDDED:
+        - The "content" field becomes a vector (semantic meaning)
+        - The "metadata" helps with filtering and debugging
+        - The "id" must be unique for each knowledge item
+        
+        📊 MONITORING:
+        - Check console for "Embedded X knowledge items" on startup
+        - More items = better coverage but slower startup
+        - Typical sweet spot: 20-100 items for most use cases
         """
-        # Check if already loaded
+        # Check if already loaded (prevents duplicate embeddings)
         existing_count = self.collection.count()
         if existing_count > 0:
             print(f"   Knowledge base already loaded ({existing_count} items)")
             return
         
         # Prepare data for ChromaDB
-        documents = []  # The actual text content
-        metadatas = []  # Metadata for filtering
-        ids = []        # Unique IDs
+        documents = []  # The actual text content that gets embedded
+        metadatas = []  # Metadata for filtering and debugging (not embedded)
+        ids = []        # Unique IDs for each knowledge item
         
+        # Load from knowledge_base.py
+        # 👉 TO ADD MORE: Edit knowledge_base.py and add items to DATABASE_KNOWLEDGE
         for item in DATABASE_KNOWLEDGE:
             documents.append(item["content"])
             metadatas.append(item["metadata"])
             ids.append(item["id"])
         
         # Add to ChromaDB (it will automatically create embeddings)
+        # This is where the magic happens - text becomes vectors!
         self.collection.add(
             documents=documents,
             metadatas=metadatas,
@@ -281,7 +470,11 @@ Make sure to follow any business rules mentioned in the knowledge."""
     def execute_sql(self, sql_query: str):
         """Execute SQL query (same as before)"""
         try:
-            conn = psycopg2.connect(**self.db_config)
+            # Support either DSN (Neon/DATABASE_URL) or kwargs
+            if 'dsn' in self.db_config:
+                conn = psycopg2.connect(self.db_config['dsn'])
+            else:
+                conn = psycopg2.connect(**self.db_config)
             cursor = conn.cursor()
             cursor.execute(sql_query)
             

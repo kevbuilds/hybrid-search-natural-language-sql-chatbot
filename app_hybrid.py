@@ -3,6 +3,8 @@ Streamlit UI for HYBRID SQL RAG Chatbot with Embeddings
 """
 import streamlit as st
 import pandas as pd
+import os
+import hashlib
 from sql_rag_hybrid import SQLRAGHybridEngine
 
 # Page config
@@ -11,6 +13,60 @@ st.set_page_config(
     page_icon="🗄️",
     layout="wide"
 )
+
+# 🔐 PASSWORD PROTECTION
+# =====================
+# This checks for password before allowing access to the app
+# Password is stored in Streamlit secrets (not in code!)
+
+def check_password():
+    """Returns `True` if the user had the correct password."""
+    
+    def password_entered():
+        """Checks whether a password entered by the user is correct."""
+        # Get password from Streamlit secrets (deployed) or environment variable (local)
+        correct_password = st.secrets.get("APP_PASSWORD", os.getenv("APP_PASSWORD", "demo123"))
+        
+        # Hash the entered password for comparison
+        entered_password = st.session_state["password"]
+        
+        if entered_password == correct_password:
+            st.session_state["password_correct"] = True
+            del st.session_state["password"]  # Don't store password
+        else:
+            st.session_state["password_correct"] = False
+
+    # First run, show password input
+    if "password_correct" not in st.session_state:
+        st.markdown("## 🔐 Authentication Required")
+        st.markdown("Please enter the password to access the SQL RAG Chatbot.")
+        st.text_input(
+            "Password", 
+            type="password", 
+            on_change=password_entered, 
+            key="password"
+        )
+        return False
+    
+    # Password not correct, show error and input again
+    elif not st.session_state["password_correct"]:
+        st.markdown("## 🔐 Authentication Required")
+        st.error("😕 Password incorrect. Please try again.")
+        st.text_input(
+            "Password", 
+            type="password", 
+            on_change=password_entered, 
+            key="password"
+        )
+        return False
+    
+    # Password correct
+    else:
+        return True
+
+# Check password before showing the app
+if not check_password():
+    st.stop()  # Don't continue if password check failed
 
 # Initialize RAG engine
 @st.cache_resource
