@@ -2,19 +2,19 @@
 # Streamlit Cloud compatible versions (Python 3.13)
 
 # AI & LLM
-anthropic==0.72.0
+anthropic
 
 # Database
-psycopg[binary]==3.2.3
+psycopg[binary]
 
 # Web Framework
-streamlit==1.39.0
-pandas==2.2.0
+streamlit
+pandas
 
 # Embeddings & Vector Search
-chromadb==0.4.24
-sentence-transformers==2.3.1
+chromadb
+sentence-transformers
 
 # Utilities
-python-dotenv==1.0.0
+python-dotenv
 
