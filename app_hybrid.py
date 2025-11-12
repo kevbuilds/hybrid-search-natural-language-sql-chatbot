@@ -105,6 +105,46 @@ with st.sidebar:
     - **order_items**: Order line items
     """)
     
+    # Add expandable section to view actual data
+    with st.expander("📊 View Database Schema & Sample Data"):
+        st.markdown("### Table Structures")
+        
+        st.markdown("**customers**")
+        st.code("""
+customer_id | name           | email                | country
+------------|----------------|---------------------|----------
+1           | John Doe       | john@example.com    | USA
+2           | Jane Smith     | jane@example.com    | UK
+3           | Bob Johnson    | bob@example.com     | Canada
+        """, language="text")
+        
+        st.markdown("**products**")
+        st.code("""
+product_id | name          | category     | price  | stock
+-----------|---------------|--------------|--------|-------
+1          | Laptop Pro    | Electronics  | 1200   | 15
+2          | Wireless Mouse| Electronics  | 25     | 100
+3          | Office Chair  | Furniture    | 350    | 30
+        """, language="text")
+        
+        st.markdown("**orders**")
+        st.code("""
+order_id | customer_id | order_date | status
+---------|-------------|------------|----------
+1        | 1           | 2024-01-15 | completed
+2        | 2           | 2024-01-20 | pending
+3        | 3           | 2024-01-22 | completed
+        """, language="text")
+        
+        st.markdown("**order_items**")
+        st.code("""
+item_id | order_id | product_id | quantity | price
+--------|----------|------------|----------|-------
+1       | 1        | 1          | 1        | 1200
+2       | 1        | 2          | 2        | 25
+3       | 2        | 3          | 1        | 350
+        """, language="text")
+    
     st.divider()
     
     st.header("Example Questions")
