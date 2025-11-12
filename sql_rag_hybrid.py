@@ -4,19 +4,21 @@ SQL RAG Engine with HYBRID SEARCH using Embeddings
 This is an enhanced version that uses:
 1. Vector embeddings for semantic search (finds relevant knowledge)
 2. Traditional schema context (table/column structure)
-3. Claude Sonnet 4 for SQL generation
+3. Sample data embeddings (actual data from tables)
+4. Claude Sonnet 4 for SQL generation
 
 HOW IT WORKS:
 1. INITIALIZATION:
-   - Loads database schema (like before)
+   - Loads database schema (table/column structure)
    - Creates embeddings of knowledge base (table descriptions, patterns, rules)
-   - Stores embeddings in ChromaDB vector database
+   - Dynamically embeds sample data from ALL tables in the database
+   - Stores all embeddings in ChromaDB vector database
 
 2. QUERY TIME (Hybrid Retrieval):
    - User asks a question
    - STEP 1: Embed the question using sentence-transformers
    - STEP 2: Search ChromaDB for similar knowledge (semantic search)
-   - STEP 3: Retrieve relevant context (descriptions, patterns, rules)
+   - STEP 3: Retrieve relevant context (descriptions, patterns, rules, sample data)
    - STEP 4: Combine with database schema
    - STEP 5: Send everything to Claude
    - STEP 6: Claude generates SQL with richer context
@@ -24,8 +26,10 @@ HOW IT WORKS:
 
 BENEFITS over simple RAG:
 - Understands synonyms (e.g., "revenue" = "sales" = "income")
+- Knows actual data values (e.g., "John Doe" is a customer)
 - Finds relevant query patterns automatically
 - Applies business rules contextually
+- Can answer specific entity questions
 - Better at complex questions
 
 🎯 HOW TO IMPROVE YOUR RAG:
@@ -157,7 +161,7 @@ load_dotenv()
 
 
 class SQLRAGHybridEngine:
-    def __init__(self):
+    def __init__(self, sample_data_size: int = 10):
         """
         Initialize the Hybrid SQL RAG engine with embeddings
         
@@ -167,7 +171,13 @@ class SQLRAGHybridEngine:
         3. Embedding model (sentence-transformers)
         4. ChromaDB vector database
         5. Loads and embeds knowledge base
+        6. Dynamically embeds sample data from all tables
+        
+        Args:
+            sample_data_size: Number of sample rows to embed from each table (default: 10)
+                             Increase for more context, decrease for faster startup
         """
+        self.sample_data_size = sample_data_size
         print("🚀 Initializing Hybrid SQL RAG Engine...")
         
         # Initialize Claude client
@@ -256,6 +266,10 @@ class SQLRAGHybridEngine:
         # Load knowledge base into vector database
         print("📚 Embedding knowledge base...")
         self._load_knowledge_base()
+        
+        # Load sample data from all tables
+        print("🎲 Embedding sample data from tables...")
+        self._load_sample_data(sample_size=self.sample_data_size)
         
         print("✅ Hybrid SQL RAG Engine ready!")
     
@@ -371,6 +385,180 @@ class SQLRAGHybridEngine:
         )
         
         print(f"   Embedded {len(documents)} knowledge items")
+    
+    def _load_sample_data(self, sample_size: int = 10):
+        """
+        Dynamically load sample data from all tables in the database
+        
+        This enhances the RAG by embedding ACTUAL data, not just schema!
+        
+        BENEFITS:
+        - Understands actual values (e.g., "John Doe" is a customer name)
+        - Knows what categories/countries/statuses exist
+        - Can answer specific entity questions
+        - Better context for foreign key relationships
+        
+        PRODUCTION-READY STRATEGY:
+        1. Discover all tables in the database
+        2. For each table:
+           - Use RANDOM sampling for diverse, representative data
+           - Detect categorical columns (low cardinality)
+           - Get UNIQUE values for categorical columns
+        3. Convert to natural language descriptions
+        4. Embed and store in ChromaDB
+        
+        Args:
+            sample_size: How many rows to sample from each table (default: 10)
+        
+        ⚙️ CONFIGURATION:
+        - Increase sample_size for more data coverage (slower startup)
+        - Decrease sample_size for faster startup (less context)
+        - Sweet spot: 5-20 rows per table
+        
+        🎯 SAMPLING STRATEGY:
+        - Uses ORDER BY RANDOM() for unbiased sampling
+        - Detects categorical columns and gets unique values
+        - Provides both examples AND value distributions
+        """
+        try:
+            # Connect to database
+            if 'dsn' in self.db_config:
+                conn = psycopg.connect(self.db_config['dsn'])
+            else:
+                conn = psycopg.connect(**self.db_config)
+            cursor = conn.cursor()
+            
+            # Get all table names
+            cursor.execute("""
+                SELECT table_name 
+                FROM information_schema.tables 
+                WHERE table_schema = 'public' 
+                AND table_type = 'BASE TABLE'
+                ORDER BY table_name
+            """)
+            
+            tables = [row[0] for row in cursor.fetchall()]
+            
+            documents = []
+            metadatas = []
+            ids = []
+            
+            # For each table, get sample data
+            for table_name in tables:
+                try:
+                    # Get column names and types for this table
+                    cursor.execute(f"""
+                        SELECT column_name, data_type, udt_name
+                        FROM information_schema.columns 
+                        WHERE table_name = '{table_name}' 
+                        AND table_schema = 'public'
+                        ORDER BY ordinal_position
+                    """)
+                    column_info = cursor.fetchall()
+                    columns = [row[0] for row in column_info]
+                    
+                    if not columns:
+                        continue
+                    
+                    # Get total row count
+                    cursor.execute(f"SELECT COUNT(*) FROM {table_name}")
+                    total_rows = cursor.fetchone()[0]
+                    
+                    if total_rows == 0:
+                        continue  # Skip empty tables
+                    
+                    # STRATEGY 1: Random sample for diverse data
+                    # Use ORDER BY RANDOM() for unbiased sampling across the entire table
+                    cursor.execute(f"SELECT * FROM {table_name} ORDER BY RANDOM() LIMIT {sample_size}")
+                    rows = cursor.fetchall()
+                    
+                    # STRATEGY 2: Detect and extract unique values for categorical columns
+                    # Categorical = low cardinality (< 50 unique values or < 10% of total rows)
+                    categorical_values = {}
+                    for col_name, data_type, udt_name in column_info:
+                        # Check if column might be categorical
+                        # Common categorical types: varchar, text, char, enum, bool
+                        if data_type in ('character varying', 'text', 'character', 'USER-DEFINED', 'boolean'):
+                            try:
+                                # Count distinct values
+                                cursor.execute(f"SELECT COUNT(DISTINCT {col_name}) FROM {table_name}")
+                                distinct_count = cursor.fetchone()[0]
+                                
+                                # If low cardinality, treat as categorical
+                                if distinct_count <= 50 and distinct_count < total_rows * 0.1:
+                                    # Get all unique values for this categorical column
+                                    cursor.execute(f"SELECT DISTINCT {col_name} FROM {table_name} WHERE {col_name} IS NOT NULL ORDER BY {col_name} LIMIT 100")
+                                    unique_vals = [row[0] for row in cursor.fetchall()]
+                                    if unique_vals:
+                                        categorical_values[col_name] = unique_vals
+                            except Exception:
+                                # Skip if query fails (e.g., can't order by complex types)
+                                pass
+                    
+                    # BUILD RICH DESCRIPTION
+                    table_summary = f"Table '{table_name}' ({total_rows} total rows):\n\n"
+                    table_summary += f"Columns: {', '.join(columns)}\n\n"
+                    
+                    # Add categorical values (what values actually exist)
+                    if categorical_values:
+                        table_summary += "📋 Categorical columns and their values:\n"
+                        for col, values in categorical_values.items():
+                            values_str = ", ".join([str(v) for v in values[:20]])  # Limit to 20 values
+                            if len(values) > 20:
+                                values_str += f" (and {len(values) - 20} more)"
+                            table_summary += f"  • {col}: {values_str}\n"
+                        table_summary += "\n"
+                    
+                    # Add sample rows (diverse examples via random sampling)
+                    table_summary += f"🎲 Random sample of {len(rows)} rows:\n"
+                    for i, row in enumerate(rows, 1):
+                        # Create a readable row description
+                        row_data = []
+                        for col, val in zip(columns, row):
+                            # Truncate long text values
+                            val_str = str(val)
+                            if len(val_str) > 100:
+                                val_str = val_str[:97] + "..."
+                            row_data.append(f"{col}={val_str}")
+                        table_summary += f"  {i}. {', '.join(row_data)}\n"
+                    
+                    # Add to embedding collection
+                    documents.append(table_summary)
+                    metadatas.append({
+                        "type": "sample_data",
+                        "table": table_name,
+                        "row_count": len(rows),
+                        "total_rows": total_rows,
+                        "columns": ", ".join(columns),
+                        "categorical_columns": ", ".join(categorical_values.keys()) if categorical_values else ""
+                    })
+                    ids.append(f"sample_data_{table_name}")
+                    
+                    cat_info = f" ({len(categorical_values)} categorical columns)" if categorical_values else ""
+                    print(f"   ✓ Embedded {len(rows)} random samples from '{table_name}'{cat_info}")
+                    
+                except Exception as e:
+                    print(f"   ⚠️  Skipped table '{table_name}': {e}")
+                    continue
+            
+            # Add all sample data to ChromaDB
+            if documents:
+                self.collection.add(
+                    documents=documents,
+                    metadatas=metadatas,
+                    ids=ids
+                )
+                print(f"   📊 Successfully embedded data from {len(documents)} tables")
+            else:
+                print(f"   ⚠️  No sample data found to embed")
+            
+            cursor.close()
+            conn.close()
+            
+        except Exception as e:
+            print(f"   ⚠️  Error loading sample data: {e}")
+            # Don't fail initialization if sample data loading fails
+            # The system can still work with just schema + knowledge base
     
     def _search_knowledge(self, query: str, n_results: int = 5):
         """
