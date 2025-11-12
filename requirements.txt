@@ -5,7 +5,7 @@
 anthropic==0.72.0          # Claude API client (upgraded for httpx compatibility)
 
 # Database
-psycopg2-binary==2.9.9     # PostgreSQL adapter for Neon
+psycopg[binary]==3.2.3     # PostgreSQL adapter for Neon (Python 3.13 compatible)
 
 # Web Framework
 streamlit==1.39.0          # Web UI framework
