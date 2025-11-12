@@ -79,28 +79,46 @@ def create_chart(df, query):
     if len(columns) < 2:
         return None
     
+    # Smart column detection: find label column and value column
+    label_col = columns[0]  # Usually first column is labels (names, categories, etc.)
+    
+    # Find numeric column for values (prefer columns with numbers)
+    value_col = None
+    for col in columns[1:]:  # Skip first column
+        # Check if column has numeric data
+        try:
+            if df[col].dtype in ['int64', 'float64', 'int32', 'float32']:
+                value_col = col
+                break
+        except:
+            pass
+    
+    # Fallback to second column if no numeric found
+    if value_col is None:
+        value_col = columns[1] if len(columns) > 1 else columns[0]
+    
     # Determine chart type based on keywords and data
     if 'pie' in query_lower and len(columns) >= 2:
-        # Pie chart - first column as labels, second as values
-        fig = px.pie(df, names=columns[0], values=columns[1], 
-                     title=f"{columns[1]} by {columns[0]}")
+        # Pie chart - use label and value columns
+        fig = px.pie(df, names=label_col, values=value_col, 
+                     title=f"{value_col} by {label_col}")
         
     elif ('line' in query_lower or 'trend' in query_lower or 'over time' in query_lower) and len(columns) >= 2:
         # Line chart
-        fig = px.line(df, x=columns[0], y=columns[1], 
-                      title=f"{columns[1]} over {columns[0]}",
+        fig = px.line(df, x=label_col, y=value_col, 
+                      title=f"{value_col} over {label_col}",
                       markers=True)
         
     elif 'scatter' in query_lower and len(columns) >= 2:
         # Scatter plot
-        fig = px.scatter(df, x=columns[0], y=columns[1],
-                        title=f"{columns[1]} vs {columns[0]}")
+        fig = px.scatter(df, x=label_col, y=value_col,
+                        title=f"{value_col} vs {label_col}")
         
     else:
         # Default: Bar chart (most common)
-        # Use first column as x-axis, second as y-axis
-        fig = px.bar(df, x=columns[0], y=columns[1],
-                     title=f"{columns[1]} by {columns[0]}")
+        # Use label column as x-axis, value column as y-axis
+        fig = px.bar(df, x=label_col, y=value_col,
+                     title=f"{value_col} by {label_col}")
     
     # Update layout for dark theme
     fig.update_layout(
@@ -515,17 +533,54 @@ try:
                     current_chat = get_current_chat()
                     chat_history = current_chat["messages"] if current_chat else []
                     
-                    # Query the database with conversation context
-                    result = rag.query(user_query, conversation_history=chat_history)
+                    # Smart detection: If user just wants to visualize previous data
+                    should_reuse_data = False
+                    prev_result = None
+                    if chat_history and should_create_chart(user_query):
+                        # Check if query is very short and references previous data
+                        query_words = user_query.lower().split()
+                        ref_words = ['it', 'that', 'this', 'same', 'above', 'previous', 'data', 'results']
+                        chart_only_words = ['plot', 'chart', 'graph', 'visualize', 'pie', 'bar', 'line']
+                        
+                        # Check if query is ONLY about charting (no new data request)
+                        has_ref = any(word in query_words for word in ref_words)
+                        is_short = len(query_words) <= 7
+                        has_chart_words = any(word in query_words for word in chart_only_words)
+                        
+                        # Key: If short query with chart words and NO specific data request words
+                        data_request_words = ['show', 'get', 'find', 'list', 'select', 'from', 'where', 'customers', 'orders', 'products']
+                        has_data_request = any(word in query_words for word in data_request_words)
+                        
+                        if has_chart_words and is_short and not has_data_request:
+                            # Try to reuse last result if it exists
+                            last_msg = chat_history[-1] if chat_history else None
+                            if last_msg and last_msg.get('results') and last_msg['results'].get('row_count', 0) > 0:
+                                prev_result = last_msg['results']
+                                should_reuse_data = True
+                    
+                    # Either reuse previous data or make new query
+                    if should_reuse_data and prev_result:
+                        result = {
+                            'sql': chat_history[-1].get('sql', ''),
+                            'results': prev_result,
+                            'relevant_knowledge': []
+                        }
+                    else:
+                        # Query the database with conversation context
+                        result = rag.query(user_query, conversation_history=chat_history)
                     
                     # Get natural language answer
                     answer = None
                     if result['results']['row_count'] > 0:
-                        answer = rag.explain_results(
-                            user_query,
-                            result['sql'],
-                            result['results']
-                        )
+                        if should_reuse_data:
+                            # Simple acknowledgment when reusing data for visualization
+                            answer = "I've created an interactive chart from the previous query results. You can explore it below."
+                        else:
+                            answer = rag.explain_results(
+                                user_query,
+                                result['sql'],
+                                result['results']
+                            )
                     else:
                         answer = "No results found for this query."
                     

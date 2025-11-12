@@ -627,6 +627,8 @@ class SQLRAGHybridEngine:
             for msg in conversation_history[-3:]:
                 conversation_context += f"User asked: {msg.get('question', '')}\n"
                 conversation_context += f"SQL generated: {msg.get('sql', '')}\n\n"
+            
+            conversation_context += "\nIMPORTANT: If the current question refers to 'it', 'that', 'this data', 'the same', or similar pronouns, the user is likely referring to the most recent query above. Generate the SAME or very similar SQL query."
         
         # STEP 3: Build comprehensive prompt
         prompt = f"""{self.schema_context}
