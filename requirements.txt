@@ -10,6 +10,7 @@ psycopg[binary]
 # Web Framework
 streamlit
 pandas
+plotly
 
 # Embeddings & Vector Search
 chromadb

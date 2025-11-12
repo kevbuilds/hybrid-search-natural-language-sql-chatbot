@@ -596,7 +596,7 @@ class SQLRAGHybridEngine:
         
         return relevant_knowledge
     
-    def generate_sql(self, natural_language_query: str) -> tuple:
+    def generate_sql(self, natural_language_query: str, conversation_history: list = None) -> tuple:
         """
         Generate SQL using HYBRID approach
         
@@ -619,11 +619,21 @@ class SQLRAGHybridEngine:
         for i, item in enumerate(relevant_knowledge, 1):
             knowledge_context += f"\n{i}. {item['content']}\n"
         
+        # STEP 2.5: Add conversation history for context
+        conversation_context = ""
+        if conversation_history and len(conversation_history) > 0:
+            conversation_context = "\n\nCONVERSATION HISTORY (for context):\n"
+            # Include last 3 messages for context
+            for msg in conversation_history[-3:]:
+                conversation_context += f"User asked: {msg.get('question', '')}\n"
+                conversation_context += f"SQL generated: {msg.get('sql', '')}\n\n"
+        
         # STEP 3: Build comprehensive prompt
         prompt = f"""{self.schema_context}
 {knowledge_context}
+{conversation_context}
 
-USER QUESTION: {natural_language_query}
+CURRENT USER QUESTION: {natural_language_query}
 
 Using the database schema and relevant knowledge above, generate a PostgreSQL query to answer this question.
 Return ONLY the SQL query, no explanations or markdown formatting.
@@ -681,14 +691,18 @@ Make sure to follow any business rules mentioned in the knowledge."""
         except Exception as e:
             raise Exception(f"Error executing SQL: {str(e)}")
     
-    def query(self, natural_language_query: str):
+    def query(self, natural_language_query: str, conversation_history: list = None):
         """
         Complete HYBRID RAG pipeline
         
-        Now includes semantic search for better context!
+        Now includes semantic search for better context AND conversation history!
+        
+        Args:
+            natural_language_query: The user's question
+            conversation_history: List of previous messages for context awareness
         """
-        # Generate SQL with hybrid search
-        sql_query, relevant_knowledge = self.generate_sql(natural_language_query)
+        # Generate SQL with hybrid search and conversation context
+        sql_query, relevant_knowledge = self.generate_sql(natural_language_query, conversation_history)
         
         # Execute SQL
         results = self.execute_sql(sql_query)
@@ -717,7 +731,12 @@ The SQL query generated was:
 The results are:
 {results_text}
 
-Provide a clear, concise natural language answer to the user's question based on these results. Be specific with numbers and details."""
+Provide a clear, concise natural language answer to the user's question based on these results. Be specific with numbers and details.
+
+IMPORTANT: 
+- Do not use any markdown formatting (no asterisks, underscores, or backticks). Use plain text only.
+- Do not create text-based charts, graphs, or ASCII art visualizations. Just provide the answer in prose.
+- If the user asked for a chart/graph/visualization, acknowledge that an interactive chart is being generated and displayed automatically. Don't say you can't create visualizations - they ARE being created for the user."""
 
         try:
             message = self.client.messages.create(
