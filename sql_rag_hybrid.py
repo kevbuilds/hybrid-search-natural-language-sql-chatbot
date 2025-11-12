@@ -138,7 +138,7 @@ After adding to knowledge_base.py:
 =====================================================================
 """
 import os
-import psycopg  # Changed from psycopg2 to psycopg (v3) for Python 3.13 compatibility
+import psycopg2  # PostgreSQL adapter
 from anthropic import Anthropic
 from dotenv import load_dotenv
 import chromadb
@@ -191,7 +191,7 @@ class SQLRAGHybridEngine:
         
         if self.neon_dsn:
             print("🔌 Using Neon/DATABASE URL from environment")
-            # We'll store a simple dict and pass either dsn or kwargs to psycopg.connect
+            # We'll store a simple dict and pass either dsn or kwargs to psycopg2.connect
             self.db_config = {"dsn": self.neon_dsn}
         else:
             db_host = os.getenv("DB_HOST", "localhost")
@@ -267,9 +267,9 @@ class SQLRAGHybridEngine:
         try:
             # Support either DSN (Neon/DATABASE_URL) or kwargs
             if 'dsn' in self.db_config:
-                conn = psycopg.connect(self.db_config['dsn'])
+                conn = psycopg2.connect(self.db_config['dsn'])
             else:
-                conn = psycopg.connect(**self.db_config)
+                conn = psycopg2.connect(**self.db_config)
             cursor = conn.cursor()
             
             cursor.execute("""
@@ -472,9 +472,9 @@ Make sure to follow any business rules mentioned in the knowledge."""
         try:
             # Support either DSN (Neon/DATABASE_URL) or kwargs
             if 'dsn' in self.db_config:
-                conn = psycopg.connect(self.db_config['dsn'])
+                conn = psycopg2.connect(self.db_config['dsn'])
             else:
-                conn = psycopg.connect(**self.db_config)
+                conn = psycopg2.connect(**self.db_config)
             cursor = conn.cursor()
             cursor.execute(sql_query)
             
