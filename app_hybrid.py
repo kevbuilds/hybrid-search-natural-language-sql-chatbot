@@ -144,6 +144,45 @@ item_id | order_id | product_id | quantity | price
 2       | 1        | 2          | 2        | 25
 3       | 2        | 3          | 1        | 350
         """, language="text")
+        
+        st.markdown("### 📖 Data Dictionary")
+        
+        st.markdown("**customers**")
+        st.markdown("""
+        - `customer_id`: Unique customer identifier (Primary Key)
+        - `name`: Full name of the customer
+        - `email`: Contact email address
+        - `country`: Customer's country of residence
+        """)
+        
+        st.markdown("**products**")
+        st.markdown("""
+        - `product_id`: Unique product identifier (Primary Key)
+        - `name`: Product name/title
+        - `category`: Product category (Electronics, Furniture, etc.)
+        - `price`: Current price in USD
+        - `stock`: Available inventory count
+        - **Business Rule**: Products with stock < 20 are considered "low stock"
+        """)
+        
+        st.markdown("**orders**")
+        st.markdown("""
+        - `order_id`: Unique order identifier (Primary Key)
+        - `customer_id`: Reference to customer who placed order (Foreign Key)
+        - `order_date`: Date when order was placed
+        - `status`: Order status (pending, completed, cancelled)
+        - **Business Rule**: Only completed orders count toward revenue
+        """)
+        
+        st.markdown("**order_items**")
+        st.markdown("""
+        - `item_id`: Unique line item identifier (Primary Key)
+        - `order_id`: Reference to parent order (Foreign Key)
+        - `product_id`: Reference to product purchased (Foreign Key)
+        - `quantity`: Number of units ordered
+        - `price`: Price per unit at time of purchase
+        - **Business Rule**: Total revenue = SUM(quantity × price)
+        """)
     
     st.divider()
     
