@@ -12,8 +12,8 @@ streamlit==1.39.0          # Web UI framework
 pandas==2.2.0              # Data manipulation
 
 # Embeddings & Vector Search
-chromadb==0.4.22           # Vector database for RAG
-sentence-transformers==2.3.1  # Embedding model (all-MiniLM-L6-v2)
+chromadb==0.5.23           # Vector database for RAG (Python 3.13 compatible)
+sentence-transformers==3.3.1  # Embedding model (all-MiniLM-L6-v2)
 
 # Utilities
 python-dotenv==1.0.0       # Environment variables (local dev only)
